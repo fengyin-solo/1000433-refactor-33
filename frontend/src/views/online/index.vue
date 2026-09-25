@@ -104,6 +104,10 @@ async function runAction(action: string, row: Row) {
     if (!response.ok) {
       throw new Error('在线仪表动作未生效，请稍后重试')
     }
+    const result = (await response.json()) as { ok: boolean; message?: string }
+    if (!result.ok) {
+      throw new Error(result.message || '在线仪表动作未生效，请稍后重试')
+    }
     await reload()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '在线仪表操作失败'
