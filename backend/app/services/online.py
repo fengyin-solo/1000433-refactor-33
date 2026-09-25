@@ -8,7 +8,7 @@ from app.store import store
 MODULE = "online"
 REQUIRED_FIELDS = ["仪表编号", "仪表类型", "测量范围"]
 STATUS_ORDER = ["待校准", "在运正常", "数据异常", "已停用"]
-ACTION_RULES = {"提交校准": "在运正常", "确认正常": "数据异常", "停用仪表": "已停用"}
+ACTION_RULES = {"提交校准": "在运正常", "确认正常": "在运正常", "停用仪表": "已停用"}
 NEGATIVE_ACTIONS = ["停用仪表"]
 
 
@@ -41,6 +41,7 @@ class OnlineService:
         entry = {"id": max((int(row.get("id", 0)) for row in rows), default=0) + 1}
         entry.update({field: values.get(field) for field in REQUIRED_FIELDS})
         entry["status"] = STATUS_ORDER[0]
+        entry["仪表状态"] = STATUS_ORDER[0]
         entry["pending"] = True
         entry["abnormal"] = False
         rows.append(entry)
@@ -50,12 +51,29 @@ class OnlineService:
         entry = store.find(MODULE, entry_id)
         if entry is None:
             return None, f"在线仪表 {entry_id} 不存在或已归档"
-        if action not in ACTION_RULES:
-            return None, f"动作「{action}」不属于在线仪表可执行范围"
-        target = ACTION_RULES[action]
-        if target not in STATUS_ORDER:
-            return None, f"目标状态「{target}」不在允许的状态序列里"
+        target, problem = self._check_action(entry, action)
+        if target is None:
+            return None, problem
         entry["status"] = target
+        entry["仪表状态"] = target
         entry["pending"] = target != STATUS_ORDER[-1]
         entry["abnormal"] = action in NEGATIVE_ACTIONS
         return entry, f"在线仪表已{action}"
+
+    def _check_action(self, entry: dict[str, Any], action: str) -> tuple[str | None, str]:
+        """提交校准、确认正常、停用仪表共用的前置校验。
+
+        返回 (目标状态, 问题说明)；目标状态为 None 表示校验未通过，问题说明即原因。
+        测量范围为空、或重复执行已经到位的动作，都拦在这里并给出可读说明。
+        """
+        target = ACTION_RULES.get(action)
+        if target is None:
+            return None, f"动作「{action}」不属于在线仪表可执行范围"
+        if target not in STATUS_ORDER:
+            return None, f"目标状态「{target}」不在允许的状态序列里"
+        label = str(entry.get("仪表编号") or f"#{entry.get('id', '?')}")
+        if not str(entry.get("测量范围") or "").strip():
+            return None, f"仪表「{label}」的测量范围为空，无法{action}，请先补全仪表档案"
+        if entry.get("status") == target:
+            return None, f"仪表「{label}」已处于「{target}」，无需重复{action}"
+        return target, ""
